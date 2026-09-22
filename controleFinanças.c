@@ -30,6 +30,12 @@ int main(){
             {
                 printf("Digite o valor que deseja cadastrar: \n");
                 scanf("%f",&receita);
+                while (receita <= 0)
+                {
+                    printf("O valor da receita deve ser maior que 0! Digite novamente: ");
+                    scanf("%f",&receita);
+                }
+                
                 totReceitas += receita;
 
                 printf("Deseja continuar? S/N\n");
