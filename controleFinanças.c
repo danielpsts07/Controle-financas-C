@@ -9,9 +9,9 @@ int main(){
     setlocale(LC_ALL,"Portuguese_Brazil");
 
     int navegador;
-    float receita,despesa,totDespesa = 0,totReceitas = 0,saldo;
+    float receita,despesa,totDespesa = 0,totReceitas = 0,saldo = 0;
     char resp;
-    bool ficar = true;
+    bool ficar = true, aux = true;
 
     while (ficar)
     {
@@ -87,7 +87,29 @@ int main(){
             break;
 
         case 5:
-            saldo = totReceitas - totDespesa;
+            while (aux)
+            {
+                printf("Possui saldo inicial? S/N\n");
+                scanf(" %c",&resp);
+                while (resp != 'S' && resp != 'N')
+                {
+                    printf("Responda apenas S / N!\n");
+                    scanf(" %c",&resp);
+                }
+                if (resp == 'S')
+                {
+                    printf("Digite seu Saldo inicial: \n");
+                    scanf("%f", &saldo);
+                    while (saldo <= 0)
+                    {
+                        printf("O saldo inicial deve ser maior que 0!!\n");
+                        scanf("%f", &saldo);
+                    }
+                }
+                aux = false;
+            }
+           
+            saldo += totReceitas - totDespesa;
             printf("Seu saldo atual é de : R$%.2f\n",saldo);
             break;
         case 6:
