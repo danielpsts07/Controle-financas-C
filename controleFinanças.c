@@ -2,15 +2,18 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <locale.h>
-
+#include <windows.h>
 int main(){
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
     setlocale(LC_ALL,"Portuguese_Brazil");
 
     int navegador;
     float receita,despesa,totDespesa = 0,totReceitas = 0,saldo;
     char resp;
+    bool ficar = true;
 
-    while (true)
+    while (ficar)
     {
         printf("=============Menu=============\n");
         printf("Escolha uma opção: \n");
@@ -87,12 +90,12 @@ int main(){
             saldo = totReceitas - totDespesa;
             printf("Seu saldo atual é de : R$%.2f\n",saldo);
             break;
-        
+        case 6:
+            ficar = false;
+            break;
+        default:
+            printf("Opção invalida!!\n");
+            break;
         }
-    if (navegador == 6)
-    {
-        break;
-    }
-    
     }
 }
