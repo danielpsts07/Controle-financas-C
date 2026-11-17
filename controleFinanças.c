@@ -1,6 +1,6 @@
-
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 #define MAX_REGISTROS 100
 #define MAX_INVESTIMENTOS 50
@@ -11,14 +11,14 @@ typedef struct {
     char descricao[TAM_TEXTO];
     char tipo[20];
     char status[30];
-    float valor;
+    double valor;
 } RegistroRelatorio;
 
 typedef struct {
     char nome[TAM_TEXTO];
-    float valorInicial;
-    float valorAtual;
-    float rendimento;
+    double valorInicial;
+    double valorAtual;
+    double rendimento;
 } Investimento;
 
 int main() {
@@ -29,14 +29,16 @@ int main() {
     int qtdRegistros = 0;
     int qtdInvestimentos = 0;
 
-    int opcao;
+    int opcao = -1;
 
-    float totalEntradas = 0;
-    float totalSaidas = 0;
-    float saldo = 0;
+    double totalEntradas = 0;
+    double totalSaidas = 0;
+    double saldo = 0;
 
     char relatorio[TAM_RELATORIO] = "";
     int posicao;
+
+    char entrada[64];   // buffer auxiliar para ler qualquer entrada
 
     do {
 
@@ -50,8 +52,10 @@ int main() {
         printf("0 - Sair\n");
 
         printf("\nEscolha: ");
-        scanf("%d", &opcao);
-        getchar();
+        if (fgets(entrada, sizeof(entrada), stdin) == NULL ||
+            sscanf(entrada, "%d", &opcao) != 1) {
+            opcao = -1;   // entrada invalida -> cai no default
+        }
 
         switch (opcao) {
 
@@ -62,28 +66,43 @@ int main() {
                     printf("\nDescricao: ");
                     fgets(registros[qtdRegistros].descricao,
                           TAM_TEXTO, stdin);
-
                     registros[qtdRegistros].descricao[
                         strcspn(registros[qtdRegistros].descricao, "\n")
                     ] = '\0';
 
                     printf("Tipo (Entrada ou Saida): ");
                     fgets(registros[qtdRegistros].tipo, 20, stdin);
-
                     registros[qtdRegistros].tipo[
                         strcspn(registros[qtdRegistros].tipo, "\n")
                     ] = '\0';
 
+                    // remove espacos no final do tipo
+                    int t = (int)strlen(registros[qtdRegistros].tipo);
+                    while (t > 0 && registros[qtdRegistros].tipo[t - 1] == ' ') {
+                        registros[qtdRegistros].tipo[t - 1] = '\0';
+                        t--;
+                    }
+
+                    // converte o tipo para minusculas
+                    for (int k = 0; registros[qtdRegistros].tipo[k] != '\0'; k++) {
+                        if (registros[qtdRegistros].tipo[k] >= 'A' &&
+                            registros[qtdRegistros].tipo[k] <= 'Z') {
+                            registros[qtdRegistros].tipo[k] += 32;
+                        }
+                    }
+
                     printf("Status (Pago, Pendente etc.): ");
                     fgets(registros[qtdRegistros].status, 30, stdin);
-
                     registros[qtdRegistros].status[
                         strcspn(registros[qtdRegistros].status, "\n")
                     ] = '\0';
 
                     printf("Valor: R$ ");
-                    scanf("%f", &registros[qtdRegistros].valor);
-                    getchar();
+                    fgets(entrada, sizeof(entrada), stdin);
+                    for (int k = 0; entrada[k] != '\0'; k++) {
+                        if (entrada[k] == ',') entrada[k] = '.';   // aceita virgula
+                    }
+                    registros[qtdRegistros].valor = atof(entrada);
 
                     qtdRegistros++;
 
@@ -105,20 +124,25 @@ int main() {
                     printf("\nNome do investimento: ");
                     fgets(investimentos[qtdInvestimentos].nome,
                           TAM_TEXTO, stdin);
-
                     investimentos[qtdInvestimentos].nome[
                         strcspn(investimentos[qtdInvestimentos].nome, "\n")
                     ] = '\0';
 
                     printf("Valor inicial: R$ ");
-                    scanf("%f",
-                          &investimentos[qtdInvestimentos].valorInicial);
+                    fgets(entrada, sizeof(entrada), stdin);
+                    for (int k = 0; entrada[k] != '\0'; k++) {
+                        if (entrada[k] == ',') entrada[k] = '.';
+                    }
+                    investimentos[qtdInvestimentos].valorInicial = atof(entrada);
 
                     printf("Valor atual: R$ ");
-                    scanf("%f",
-                          &investimentos[qtdInvestimentos].valorAtual);
+                    fgets(entrada, sizeof(entrada), stdin);
+                    for (int k = 0; entrada[k] != '\0'; k++) {
+                        if (entrada[k] == ',') entrada[k] = '.';
+                    }
+                    investimentos[qtdInvestimentos].valorAtual = atof(entrada);
 
-                    getchar();
+                    investimentos[qtdInvestimentos].rendimento = 0;
 
                     qtdInvestimentos++;
 
@@ -146,17 +170,10 @@ int main() {
                     for (int i = 0; i < qtdRegistros; i++) {
 
                         printf("\nRegistro %d\n", i + 1);
-                        printf("Descricao: %s\n",
-                               registros[i].descricao);
-
-                        printf("Tipo: %s\n",
-                               registros[i].tipo);
-
-                        printf("Status: %s\n",
-                               registros[i].status);
-
-                        printf("Valor: R$ %.2f\n",
-                               registros[i].valor);
+                        printf("Descricao: %s\n", registros[i].descricao);
+                        printf("Tipo: %s\n", registros[i].tipo);
+                        printf("Status: %s\n", registros[i].status);
+                        printf("Valor: R$ %.2f\n", registros[i].valor);
                     }
                 }
 
@@ -170,17 +187,10 @@ int main() {
 
                 for (int i = 0; i < qtdRegistros; i++) {
 
-                    if (strcmp(registros[i].tipo, "Entrada") == 0 ||
-                        strcmp(registros[i].tipo, "entrada") == 0) {
-
+                    if (strcmp(registros[i].tipo, "entrada") == 0) {
                         totalEntradas += registros[i].valor;
-
-                    } else if (
-                        strcmp(registros[i].tipo, "Saida") == 0 ||
-                        strcmp(registros[i].tipo, "saida") == 0) {
-
+                    } else if (strcmp(registros[i].tipo, "saida") == 0) {
                         totalSaidas += registros[i].valor;
-
                     }
 
                 }
@@ -188,13 +198,8 @@ int main() {
                 saldo = totalEntradas - totalSaidas;
 
                 printf("\n===== RESUMO BANCARIO =====\n");
-
-                printf("Total de entradas: R$ %.2f\n",
-                       totalEntradas);
-
-                printf("Total de saidas: R$ %.2f\n",
-                       totalSaidas);
-
+                printf("Total de entradas: R$ %.2f\n", totalEntradas);
+                printf("Total de saidas: R$ %.2f\n", totalSaidas);
                 printf("Saldo: R$ %.2f\n", saldo);
 
                 break;
@@ -216,17 +221,10 @@ int main() {
                             investimentos[i].valorAtual -
                             investimentos[i].valorInicial;
 
-                        printf("\nInvestimento: %s\n",
-                               investimentos[i].nome);
-
-                        printf("Valor inicial: R$ %.2f\n",
-                               investimentos[i].valorInicial);
-
-                        printf("Valor atual: R$ %.2f\n",
-                               investimentos[i].valorAtual);
-
-                        printf("Rendimento: R$ %.2f\n",
-                               investimentos[i].rendimento);
+                        printf("\nInvestimento: %s\n", investimentos[i].nome);
+                        printf("Valor inicial: R$ %.2f\n", investimentos[i].valorInicial);
+                        printf("Valor atual: R$ %.2f\n", investimentos[i].valorAtual);
+                        printf("Rendimento: R$ %.2f\n", investimentos[i].rendimento);
 
                     }
 
@@ -236,6 +234,11 @@ int main() {
 
 
             case 6:
+
+                if (qtdRegistros == 0 && qtdInvestimentos == 0) {
+                    printf("\nNada cadastrado ainda. Use as opcoes 1 e 2 primeiro.\n");
+                    break;
+                }
 
                 relatorio[0] = '\0';
                 posicao = 0;
@@ -301,6 +304,24 @@ int main() {
 
                     posicao += tamanho;
 
+                }
+
+                // Resumo
+                totalEntradas = 0;
+                totalSaidas = 0;
+                for (int i = 0; i < qtdRegistros; i++) {
+                    if (strcmp(registros[i].tipo, "entrada") == 0)
+                        totalEntradas += registros[i].valor;
+                    else if (strcmp(registros[i].tipo, "saida") == 0)
+                        totalSaidas += registros[i].valor;
+                }
+                saldo = totalEntradas - totalSaidas;
+
+                if (posicao < TAM_RELATORIO - 1) {
+                    posicao += snprintf(relatorio + posicao,
+                                        TAM_RELATORIO - posicao,
+                                        "\n--- RESUMO ---\nEntradas: R$ %.2f | Saidas: R$ %.2f | Saldo: R$ %.2f\n",
+                                        totalEntradas, totalSaidas, saldo);
                 }
 
                 printf("\n%s", relatorio);
