@@ -5,9 +5,14 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <ctype.h>
+#include <errno.h>
+#include <float.h>
+#include <time.h>
 
 #define MAX_USUARIOS 10
 #define MAX_REGISTROS 50
+#define MAX_DESPESAS MAX_REGISTROS
 #define MAX_INVESTIMENTOS 30
 #define MAX_HISTORICOS 50
 #define TAM_TEXTO 100
@@ -39,6 +44,16 @@ typedef struct {
 } Data;
 
 typedef struct {
+    int id;
+    char descricao[TAM_TEXTO];
+    double valor;
+    Data prazoPagamento;
+    int paga;
+    Data dataPagamento;
+    int indiceRegistroRelatorio;
+} Despesa;
+
+typedef struct {
     char nomeInvestimento[TAM_TEXTO];
     Data periodo;
     double valorAnterior;
@@ -63,6 +78,8 @@ typedef struct {
     int qtdInvestimentos;
     HistoricoInvestimento historicos[MAX_HISTORICOS];
     int qtdHistoricos;
+    Despesa despesas[MAX_DESPESAS];
+    int qtdDespesas;
 } Usuario;
 
 /* Dados do sistema (globais, para as funcoes e menus compartilharem) */
@@ -87,6 +104,208 @@ int lerInt(const char *msg)
         if (fgets(buf, sizeof buf, stdin) == NULL) return 0;
         if (sscanf(buf, "%d", &v) == 1) return v;
         printf("Entrada invalida. Digite apenas numeros.\n");
+    }
+}
+
+static int dataValida(Data data)
+{
+    static const int diasPorMes[] = {
+        31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
+    };
+    int limite;
+
+    if (data.ano < 1 || data.mes < 1 || data.mes > 12 || data.dia < 1)
+        return 0;
+
+    limite = diasPorMes[data.mes - 1];
+    if (data.mes == 2 &&
+        (data.ano % 400 == 0 ||
+         (data.ano % 4 == 0 && data.ano % 100 != 0))) {
+        limite = 29;
+    }
+    return data.dia <= limite;
+}
+
+static long long diaSerial(Data data)
+{
+    long long ano = data.ano;
+    int mes = data.mes;
+    long long era;
+    long long anoDaEra;
+    int mesAjustado;
+    int diaDoAno;
+    long long diaDaEra;
+
+    ano -= mes <= 2;
+    era = ano / 400;
+    anoDaEra = ano - era * 400;
+    mesAjustado = mes + (mes > 2 ? -3 : 9);
+    diaDoAno = (153 * mesAjustado + 2) / 5 + data.dia - 1;
+    diaDaEra = anoDaEra * 365 + anoDaEra / 4 - anoDaEra / 100 + diaDoAno;
+    return era * 146097 + diaDaEra;
+}
+
+static int compararDatas(Data a, Data b)
+{
+    if (a.ano != b.ano) return a.ano < b.ano ? -1 : 1;
+    if (a.mes != b.mes) return a.mes < b.mes ? -1 : 1;
+    if (a.dia != b.dia) return a.dia < b.dia ? -1 : 1;
+    return 0;
+}
+
+static int dataAtualLocal(Data *data)
+{
+    time_t agora;
+    struct tm *local;
+
+    agora = time(NULL);
+    local = localtime(&agora);
+    if (local == NULL) return 0;
+
+    data->dia = local->tm_mday;
+    data->mes = local->tm_mon + 1;
+    data->ano = local->tm_year + 1900;
+    return 1;
+}
+
+/* Retorna 1 quando leu a linha, 0 no fim da entrada e -1 se ela excedeu o limite. */
+static int lerLinha(const char *prompt, char *destino, size_t capacidade)
+{
+    size_t tamanho;
+    int proximo;
+
+    if (capacidade < 2) return 0;
+    printf("%s", prompt);
+    if (fgets(destino, (int)capacidade, stdin) == NULL) return 0;
+
+    tamanho = strcspn(destino, "\r\n");
+    if (destino[tamanho] == '\0' && !feof(stdin)) {
+        proximo = getchar();
+        if (proximo != '\n' && proximo != EOF) {
+            while (proximo != '\n' && proximo != EOF)
+                proximo = getchar();
+            return -1;
+        }
+    }
+    destino[tamanho] = '\0';
+    return 1;
+}
+
+static int lerDescricaoObrigatoria(const char *prompt,
+                                   char *destino, size_t capacidade)
+{
+    int estado;
+    size_t inicio;
+    size_t fim;
+
+    for (;;) {
+        estado = lerLinha(prompt, destino, capacidade);
+        if (estado == 0) return 0;
+        if (estado < 0) {
+            printf("Descricao muito longa. Use ate %lu caracteres.\n",
+                   (unsigned long)(capacidade - 1));
+            continue;
+        }
+
+        inicio = 0;
+        fim = strlen(destino);
+        while (inicio < fim && isspace((unsigned char)destino[inicio]))
+            inicio++;
+        while (fim > inicio && isspace((unsigned char)destino[fim - 1]))
+            fim--;
+        if (inicio == fim) {
+            printf("A descricao nao pode ficar vazia.\n");
+            continue;
+        }
+
+        memmove(destino, destino + inicio, fim - inicio);
+        destino[fim - inicio] = '\0';
+        return 1;
+    }
+}
+
+static int interpretarData(const char *texto, Data *data)
+{
+    size_t tamanho;
+    int i;
+    int dia;
+    int mes;
+    int ano;
+    int caracteresLidos;
+    Data candidata;
+
+    tamanho = strlen(texto);
+    if (tamanho != 10 || texto[2] != '/' || texto[5] != '/')
+        return 0;
+
+    for (i = 0; i < 10; i++) {
+        if (i != 2 && i != 5 && !isdigit((unsigned char)texto[i]))
+            return 0;
+    }
+
+    caracteresLidos = 0;
+    if (sscanf(texto, "%2d/%2d/%4d%n",
+               &dia, &mes, &ano, &caracteresLidos) != 3 ||
+        caracteresLidos != 10) {
+        return 0;
+    }
+
+    candidata.dia = dia;
+    candidata.mes = mes;
+    candidata.ano = ano;
+    if (!dataValida(candidata)) return 0;
+    *data = candidata;
+    return 1;
+}
+
+static int lerDataObrigatoria(const char *prompt, Data *data)
+{
+    char entrada[32];
+    int estado;
+
+    for (;;) {
+        estado = lerLinha(prompt, entrada, sizeof entrada);
+        if (estado == 0) return 0;
+        if (estado < 0 || !interpretarData(entrada, data)) {
+            printf("Data invalida. Informe uma data real no formato DD/MM/AAAA.\n");
+            continue;
+        }
+        return 1;
+    }
+}
+
+static int lerValorPositivo(const char *prompt, double *valorLido)
+{
+    char entrada[64];
+    char *fim;
+    int estado;
+    int i;
+    double valor;
+
+    for (;;) {
+        estado = lerLinha(prompt, entrada, sizeof entrada);
+        if (estado == 0) return 0;
+        if (estado < 0) {
+            printf("Valor invalido. Informe um numero positivo.\n");
+            continue;
+        }
+
+        for (i = 0; entrada[i] != '\0'; i++) {
+            if (entrada[i] == ',') entrada[i] = '.';
+        }
+
+        errno = 0;
+        valor = strtod(entrada, &fim);
+        while (*fim != '\0' && isspace((unsigned char)*fim))
+            fim++;
+        if (fim == entrada || *fim != '\0' || errno == ERANGE ||
+            valor != valor || valor <= 0.0 || valor > DBL_MAX) {
+            printf("Valor invalido. Informe um numero positivo.\n");
+            continue;
+        }
+
+        *valorLido = valor;
+        return 1;
     }
 }
 
@@ -280,6 +499,7 @@ void cadastrarUsuario(void)
     usuarios[qtdUsuarios].qtdRegistros = 0;
     usuarios[qtdUsuarios].qtdInvestimentos = 0;
     usuarios[qtdUsuarios].qtdHistoricos = 0;
+    usuarios[qtdUsuarios].qtdDespesas = 0;
     qtdUsuarios++;
 
     if (primeiro)
@@ -444,14 +664,171 @@ void exibirMovimentacoes(Usuario *u)
     }
 }
 
-/* ATENCAO: o codigo enviado pelo grupo NAO tem "pagar despesa", "prazo de
-   pagamento" nem "data de pagamento" (cartoes da Givercy). Esta funcao e
-   so um ponto de ligacao: quando essa parte ficar pronta, e so colocar o
-   codigo aqui dentro. */
+void cadastrarDespesa(Usuario *u)
+{
+    Despesa nova;
+    int indiceRegistro;
+
+    if (u->qtdDespesas >= MAX_DESPESAS ||
+        u->qtdRegistros >= MAX_REGISTROS) {
+        printf("\nLimite de despesas ou movimentacoes atingido!\n");
+        return;
+    }
+
+    memset(&nova, 0, sizeof nova);
+    if (!lerDescricaoObrigatoria("\nDescricao da despesa: ",
+                                 nova.descricao, sizeof nova.descricao)) {
+        return;
+    }
+    if (!lerValorPositivo("Valor: R$ ", &nova.valor)) return;
+    if (!lerDataObrigatoria("Prazo de pagamento (DD/MM/AAAA): ",
+                            &nova.prazoPagamento)) {
+        return;
+    }
+
+    nova.id = u->qtdDespesas + 1;
+    nova.paga = 0;
+    indiceRegistro = u->qtdRegistros;
+    nova.indiceRegistroRelatorio = indiceRegistro;
+
+    u->despesas[u->qtdDespesas] = nova;
+    strcpy(u->registros[indiceRegistro].descricao, nova.descricao);
+    strcpy(u->registros[indiceRegistro].tipo, "saida");
+    strcpy(u->registros[indiceRegistro].status, "Pendente");
+    u->registros[indiceRegistro].valor = nova.valor;
+
+    u->qtdDespesas++;
+    u->qtdRegistros++;
+    printf("\nDespesa cadastrada com vencimento em %02d/%02d/%04d.\n",
+           nova.prazoPagamento.dia,
+           nova.prazoPagamento.mes,
+           nova.prazoPagamento.ano);
+}
+
+void exibirDespesas(Usuario *u)
+{
+    int i;
+    Despesa *despesa;
+
+    if (u->qtdDespesas == 0) {
+        printf("\nNenhuma despesa com vencimento cadastrada.\n");
+        return;
+    }
+
+    printf("\n===== DESPESAS DE %s =====\n", u->nome);
+    for (i = 0; i < u->qtdDespesas; i++) {
+        despesa = &u->despesas[i];
+        printf("\nID: %d | %s | R$ %.2f\n",
+               despesa->id, despesa->descricao, despesa->valor);
+        printf("Vencimento: %02d/%02d/%04d\n",
+               despesa->prazoPagamento.dia,
+               despesa->prazoPagamento.mes,
+               despesa->prazoPagamento.ano);
+        if (despesa->paga) {
+            printf("Status: Paga | Data de pagamento: %02d/%02d/%04d\n",
+                   despesa->dataPagamento.dia,
+                   despesa->dataPagamento.mes,
+                   despesa->dataPagamento.ano);
+        } else {
+            printf("Status: Pendente\n");
+        }
+    }
+}
+
+void exibirAvisos(Usuario *u, Data hoje)
+{
+    int i;
+    int encontrou;
+    int comparacao;
+    int dias;
+    long long diferenca;
+    long long serialHoje;
+    Despesa *despesa;
+
+    if (!dataValida(hoje)) {
+        printf("\nNao foi possivel obter uma data atual valida para os avisos.\n");
+        return;
+    }
+
+    encontrou = 0;
+    serialHoje = diaSerial(hoje);
+    printf("\n===== AVISOS DE VENCIMENTO =====\n");
+    for (i = 0; i < u->qtdDespesas; i++) {
+        despesa = &u->despesas[i];
+        if (despesa->paga) continue;
+
+        comparacao = compararDatas(despesa->prazoPagamento, hoje);
+        diferenca = diaSerial(despesa->prazoPagamento) - serialHoje;
+        if (comparacao > 0 && diferenca > 7) continue;
+
+        encontrou = 1;
+        if (comparacao < 0) {
+            printf("VENCIDA | ");
+        } else if (comparacao == 0) {
+            printf("VENCE HOJE | ");
+        } else {
+            dias = (int)diferenca;
+            printf("VENCE EM %d DIA(S) | ", dias);
+        }
+        printf("ID: %d | %s | R$ %.2f | Prazo: %02d/%02d/%04d\n",
+               despesa->id,
+               despesa->descricao,
+               despesa->valor,
+               despesa->prazoPagamento.dia,
+               despesa->prazoPagamento.mes,
+               despesa->prazoPagamento.ano);
+    }
+
+    if (!encontrou)
+        printf("Nenhuma despesa pendente vence nos proximos sete dias.\n");
+}
+
 void pagarDespesa(Usuario *u)
 {
-    (void)u;
-    printf("\n[Pagamento de despesa - ainda nao implementado pelo grupo]\n");
+    int id;
+    int indice;
+    int indiceRegistro;
+    Data dataPagamento;
+
+    if (u->qtdDespesas == 0) {
+        printf("\nNenhuma despesa cadastrada para pagar.\n");
+        return;
+    }
+
+    exibirDespesas(u);
+    id = lerInt("\nID da despesa a pagar (0 para cancelar): ");
+    if (id == 0) return;
+    if (id < 1 || id > u->qtdDespesas) {
+        printf("\nID de despesa invalido.\n");
+        return;
+    }
+
+    indice = id - 1;
+    if (u->despesas[indice].paga) {
+        printf("\nEssa despesa ja foi paga em %02d/%02d/%04d.\n",
+               u->despesas[indice].dataPagamento.dia,
+               u->despesas[indice].dataPagamento.mes,
+               u->despesas[indice].dataPagamento.ano);
+        return;
+    }
+
+    if (!lerDataObrigatoria("Data do pagamento (DD/MM/AAAA): ",
+                            &dataPagamento)) {
+        return;
+    }
+
+    u->despesas[indice].dataPagamento = dataPagamento;
+    u->despesas[indice].paga = 1;
+
+    indiceRegistro = u->despesas[indice].indiceRegistroRelatorio;
+    if (indiceRegistro >= 0 && indiceRegistro < u->qtdRegistros)
+        strcpy(u->registros[indiceRegistro].status, "Pago");
+
+    printf("\nDespesa \"%s\" marcada como paga em %02d/%02d/%04d.\n",
+           u->despesas[indice].descricao,
+           dataPagamento.dia,
+           dataPagamento.mes,
+           dataPagamento.ano);
 }
 
 /* ================================================================== */
@@ -974,13 +1351,17 @@ void menuInvestimentos(Usuario *u)
 void menuDespesas(Usuario *u)
 {
     struct MenuOpcao opcoes[] = {
-        {1, "Cadastrar movimentacao / despesa"},
+        {1, "Cadastrar movimentacao"},
         {2, "Exibir movimentacoes"},
-        {3, "Pagar despesa"},
+        {3, "Cadastrar despesa com vencimento"},
+        {4, "Listar despesas com prazo"},
+        {5, "Registrar pagamento de despesa"},
+        {6, "Avisos de vencimento"},
         {0, "Voltar"}
     };
     int n = sizeof opcoes / sizeof opcoes[0];
     int escolha;
+    Data hoje;
 
     do {
         escolha = escolherOpcao("GERENCIAMENTO DE DESPESAS", "", opcoes, n);
@@ -991,7 +1372,19 @@ void menuDespesas(Usuario *u)
             exibirMovimentacoes(u);
             pausa();
         } else if (escolha == 3) {
+            cadastrarDespesa(u);
+            pausa();
+        } else if (escolha == 4) {
+            exibirDespesas(u);
+            pausa();
+        } else if (escolha == 5) {
             pagarDespesa(u);
+            pausa();
+        } else if (escolha == 6) {
+            if (dataAtualLocal(&hoje))
+                exibirAvisos(u, hoje);
+            else
+                printf("\nNao foi possivel obter a data local atual.\n");
             pausa();
         }
     } while (escolha != 0);
@@ -1033,10 +1426,21 @@ void areaUsuario(int idx)
     int escolha;
     char titulo[TAM_TEXTO + 30];
     char info[120];
+    Data hoje;
 
     sprintf(titulo, "AREA DO USUARIO - %s", u->nome);
     sprintf(info, "Conta %s: %d | Ag: %d", u->conta.tipo,
             u->conta.numeroConta, u->conta.agencia);
+
+    if (u->qtdDespesas > 0) {
+        limparTela();
+        cabecalho("AVISOS DE DESPESAS", "");
+        if (dataAtualLocal(&hoje))
+            exibirAvisos(u, hoje);
+        else
+            printf("Nao foi possivel obter a data local atual.\n");
+        pausa();
+    }
 
     do {
         escolha = escolherOpcao(titulo, info, opcoes, n);
